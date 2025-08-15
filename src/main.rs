@@ -3,8 +3,12 @@ mod handlers;
 mod models;
 
 use crate::{
-    chess::helpers::{get_all_moves, initialize_starting_position},
+    chess::{
+        bitboards::get_initial_bitboards,
+        helpers::{get_all_moves, initialize_starting_position},
+    },
     handlers::{board::get_all_moves_handler, moves::move_piece_handler},
+    models::response::AppState,
 };
 use axum::{Error, Router, http::HeaderValue, routing::get};
 use hyper::Method;
@@ -21,6 +25,8 @@ async fn main() {
 
 async fn create_router() -> Result<Router, Error> {
     let board = Arc::new(Mutex::new(initialize_starting_position()));
+    let bitboards = get_initial_bitboards();
+    let state = AppState { board, bitboards };
 
     let cors = CorsLayer::new()
         .allow_origin(HeaderValue::from_static("http://localhost:3000"))
@@ -29,7 +35,7 @@ async fn create_router() -> Result<Router, Error> {
     let router = Router::new()
         .route("/board", get(get_all_moves_handler))
         .route("/move/{origin}/{destination}", get(move_piece_handler))
-        .with_state(board.clone())
+        .with_state(state)
         .layer(cors);
 
     Ok(router)

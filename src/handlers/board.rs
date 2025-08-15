@@ -1,14 +1,12 @@
 use crate::{
     chess::helpers::get_all_moves,
-    models::{board::Board, response::BoardWithMoves},
+    models::response::{AppState, BoardWithMoves},
 };
 use axum::{Json, extract::State};
 use hyper::StatusCode;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub async fn get_all_moves_handler(
-    State(board): State<Arc<Mutex<Board>>>,
+    State(AppState { board, bitboards }): State<AppState>,
 ) -> Result<Json<BoardWithMoves>, StatusCode> {
     let board = board.lock().await;
     Ok(Json(BoardWithMoves {

@@ -1,7 +1,6 @@
 use crate::get_all_moves;
 use crate::models::piece::{Piece, PieceColor, PieceGroup};
 use crate::models::position::Positions;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

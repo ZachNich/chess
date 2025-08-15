@@ -1,16 +1,78 @@
+use std::collections::HashMap;
+
 use crate::models::{
     piece::{Piece, PieceColor, PieceGroup},
     position::Positions,
 };
 
-fn create_bitboard(piece: Piece) -> u64 {
+pub fn get_initial_bitboards() -> HashMap<Piece, u64> {
+    let mut map = HashMap::new();
+    let pieces = [
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::Pawn,
+        },
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::Rook,
+        },
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::Knight,
+        },
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::Bishop,
+        },
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::Queen,
+        },
+        Piece {
+            color: PieceColor::White,
+            group: PieceGroup::King,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::Pawn,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::Rook,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::Knight,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::Bishop,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::Queen,
+        },
+        Piece {
+            color: PieceColor::Black,
+            group: PieceGroup::King,
+        },
+    ];
+
+    for piece in pieces {
+        map.insert(piece, create_bitboard_for_piece(piece));
+    }
+
+    map
+}
+
+fn create_bitboard_for_piece(piece: Piece) -> u64 {
     match piece.group {
         PieceGroup::Pawn => create_pawn_bitboard(piece.color),
-        PieceGroup::Rook => 1u64,   //TODO
-        PieceGroup::Knight => 1u64, //TODO
-        PieceGroup::Bishop => 1u64, //TODO
-        PieceGroup::Queen => 1u64,  //TODO
-        PieceGroup::King => 1u64,   //TODO
+        PieceGroup::Rook => create_rook_bitboard(piece.color),
+        PieceGroup::Knight => create_knight_bitboard(piece.color),
+        PieceGroup::Bishop => create_bishop_bitboard(piece.color),
+        PieceGroup::Queen => create_queen_bitboard(piece.color),
+        PieceGroup::King => create_king_bitboard(piece.color),
     }
 }
 
