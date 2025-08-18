@@ -1,16 +1,16 @@
-use crate::models::{board::Board, piece::Piece};
+use crate::models::{bitboards::Bitboards, board::Board, piece::Piece};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BoardWithMoves {
+pub struct SquaresAndMoves {
     pub squares: Vec<Option<Piece>>,
-    pub moves: Vec<Vec<u8>>,
+    pub moves: Vec<u64>,
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub board: Arc<Mutex<Board>>,
-    pub bitboards: HashMap<Piece, u64>,
+    pub bitboards: Arc<Mutex<Bitboards>>,
 }
