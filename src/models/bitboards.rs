@@ -118,6 +118,14 @@ impl Bitboards {
         }
     }
 
+    fn create_bitboard_for_positions(positions: Vec<Positions>) -> u64 {
+        let mut bitboard: u64 = 0;
+        for position in positions {
+            bitboard |= 1u64 << position.to_index();
+        }
+        bitboard
+    }
+
     fn create_pawn_bitboard(color: PieceColor) -> u64 {
         match color {
             PieceColor::White => Bitboards::create_bitboard_for_positions(vec![
@@ -141,14 +149,6 @@ impl Bitboards {
                 Positions::H7,
             ]),
         }
-    }
-
-    fn create_bitboard_for_positions(positions: Vec<Positions>) -> u64 {
-        let mut bitboard: u64 = 0;
-        for position in positions {
-            bitboard |= 1u64 << position.to_index();
-        }
-        bitboard
     }
 
     fn create_rook_bitboard(color: PieceColor) -> u64 {
@@ -216,10 +216,10 @@ impl Bitboards {
     fn get_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
         match piece.group {
             PieceGroup::Pawn => self.get_pawn_attacks(origin, piece),
-            PieceGroup::Rook => self.get_rook_attacks(origin, piece),
+            PieceGroup::Rook => self.get_sliding_attacks(origin, piece),
             PieceGroup::Knight => self.get_knight_attacks(origin, piece),
-            PieceGroup::Bishop => self.get_bishop_attacks(origin, piece),
-            PieceGroup::Queen => self.get_queen_attacks(origin, piece),
+            PieceGroup::Bishop => self.get_sliding_attacks(origin, piece),
+            PieceGroup::Queen => self.get_sliding_attacks(origin, piece),
             PieceGroup::King => self.get_king_attacks(origin, piece),
         }
     }
@@ -228,11 +228,21 @@ impl Bitboards {
         if let Some(piece) = self.get_occupant(origin) {
             match piece.group {
                 PieceGroup::Pawn => self.get_pawn_moves(origin, piece),
-                PieceGroup::Rook => self.get_rook_moves(origin, piece),
+                PieceGroup::Rook => self.get_sliding_moves(origin, piece),
                 PieceGroup::Knight => self.get_knight_moves(origin, piece),
-                PieceGroup::Bishop => self.get_bishop_moves(origin, piece),
-                PieceGroup::Queen => self.get_queen_moves(origin, piece),
-                PieceGroup::King => self.get_king_moves(origin, piece),
+                PieceGroup::Bishop => self.get_sliding_moves(origin, piece),
+                PieceGroup::Queen => self.get_sliding_moves(origin, piece),
+                PieceGroup::King => {
+                    let is_checked = self.attacks
+                        [Piece::color_to_index(Piece::get_opposite_color(piece.color))]
+                        & Bitboards::convert_to_bit(origin)
+                        != 0;
+                    //check if is_checked before getting any legal moves
+                    //you can check this by comparing king's bb to opposite color's attacking bb
+                    //if is_checked, can only move king to undefended square OR move same-color piece to block
+                    //BUT cannot move a piece that is alraedy blocking a check
+                    self.get_king_moves(origin, piece)
+                }
             }
         } else {
             0u64
@@ -358,28 +368,13 @@ impl Bitboards {
         moves_bitboard
     }
 
-    fn create_legal_attacks_bitboard(
-        &self,
-        piece: Piece,
-        possible_attacks: Vec<u8>,
-        origin: u8,
-    ) -> u64 {
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_move in possible_attacks {
-            if self.is_valid_attack(origin, possible_move, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_move;
-            }
-        }
-
-        //return bitboard with 1s in all legal attack positions
-        attacks_bitboard
-    }
-
-    fn get_rook_moves(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 4] = [1, -1, 8, -8];
+    fn get_sliding_moves(&mut self, origin: u8, piece: Piece) -> u64 {
+        let directions = match piece.group {
+            PieceGroup::Bishop => vec![7, -7, 9, -9],
+            PieceGroup::Rook => vec![1, -1, 8, -8],
+            PieceGroup::Queen => vec![1, -1, 7, -7, 8, -8, 9, -9],
+            _ => vec![],
+        };
         let mut possible_moves = vec![];
 
         for direction in directions {
@@ -392,13 +387,18 @@ impl Bitboards {
                     break; //out of vertical bounds
                 }
 
-                let from_file = origin as i8 % 8; //TODO: Find idiomatic way to handle i8/u8 comparisons
+                let from_file = origin as i8 % 8;
                 let to_file = destination % 8;
+                let from_rank = origin as i8 / 8;
+                let to_rank = destination / 8;
+                let file_diff = (from_file - to_file).abs();
+                let rank_diff = (from_rank - to_rank).abs();
 
-                if (direction == 1 && to_file <= from_file)
-                    || (direction == -1 && to_file >= from_file)
-                {
-                    break; //out of horizontal bounds
+                match direction {
+                    1 if to_file <= from_file => break,
+                    -1 if to_file >= from_file => break,
+                    7 | -7 | 9 | -9 if file_diff != rank_diff => break,
+                    _ => {}
                 }
 
                 if let Some(piece_at_destination) = self.get_occupant(destination as u8) {
@@ -457,109 +457,6 @@ impl Bitboards {
             }
 
             possible_moves.push(destination as u8);
-        }
-
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut moves_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
-                moves_bitboard |= 1u64 << possible_move;
-            }
-        }
-
-        moves_bitboard
-    }
-
-    fn get_bishop_moves(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 4] = [7, 9, -7, -9];
-        let mut possible_moves = vec![];
-
-        for direction in directions {
-            let mut destination = origin as i8;
-
-            for _ in 0..7 {
-                destination += direction;
-
-                if destination < 0 || destination > 63 {
-                    break; //out of vertical bounds
-                }
-
-                let from_file = origin as i8 % 8;
-                let to_file = destination % 8;
-                let from_rank = origin as i8 / 8;
-                let to_rank = destination / 8;
-                let file_diff = (from_file - to_file).abs();
-                let rank_diff = (from_rank - to_rank).abs();
-
-                if !(file_diff == rank_diff) {
-                    break; //out of horizontal bounds
-                }
-
-                if let Some(piece_at_destination) = self.get_occupant(destination as u8) {
-                    if piece_at_destination.color == Piece::get_opposite_color(piece.color) {
-                        //is capture
-                        possible_moves.push(destination as u8);
-                    }
-                    break;
-                }
-
-                possible_moves.push(destination as u8);
-            }
-        }
-
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut moves_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
-                moves_bitboard |= 1u64 << possible_move;
-            }
-        }
-
-        moves_bitboard
-    }
-
-    fn get_queen_moves(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 8] = [1, 8, 7, 9, -1, -8, -7, -9];
-        let mut possible_moves = vec![];
-
-        for direction in directions {
-            let mut destination = origin as i8;
-
-            for _ in 0..7 {
-                destination += direction;
-
-                if destination < 0 || destination > 63 {
-                    break; //out of vertical bounds
-                }
-
-                let from_file = origin as i8 % 8;
-                let to_file = destination % 8;
-                let from_rank = origin as i8 / 8;
-                let to_rank = destination / 8;
-                let file_diff = (from_file - to_file).abs();
-                let rank_diff = (from_rank - to_rank).abs();
-
-                match direction {
-                    1 if to_file <= from_file => break,
-                    -1 if to_file >= from_file => break,
-                    7 | -7 | 9 | -9 if file_diff != rank_diff => break,
-                    _ => {}
-                }
-
-                if let Some(piece_at_destination) = self.get_occupant(destination as u8) {
-                    if piece_at_destination.color == Piece::get_opposite_color(piece.color) {
-                        //is capture
-                        possible_moves.push(destination as u8);
-                    }
-                    break;
-                }
-
-                possible_moves.push(destination as u8);
-            }
         }
 
         let piece_bitboard = self.all_pieces[piece.to_index()];
@@ -637,6 +534,8 @@ impl Bitboards {
         moves_bitboard
     }
 
+    /* Attack Calculations */
+
     fn get_pawn_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
         match piece.color {
             PieceColor::White => return self.get_white_pawn_attacks(origin, piece),
@@ -681,51 +580,6 @@ impl Bitboards {
         self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
     }
 
-    fn get_rook_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 4] = [1, -1, 8, -8];
-        let mut possible_attacks = vec![];
-
-        for direction in directions {
-            let mut destination = origin as i8;
-
-            for _ in 0..7 {
-                destination += direction;
-
-                if destination < 0 || destination > 63 {
-                    break; //out of vertical bounds
-                }
-
-                let from_file = origin as i8 % 8; //TODO: Find idiomatic way to handle i8/u8 comparisons
-                let to_file = destination % 8;
-
-                if (direction == 1 && to_file <= from_file)
-                    || (direction == -1 && to_file >= from_file)
-                {
-                    break; //out of horizontal bounds
-                }
-
-                possible_attacks.push(destination as u8);
-
-                if let Some(_) = self.get_occupant(destination as u8) {
-                    break;
-                }
-            }
-        }
-
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_attack in possible_attacks {
-            if self.is_valid_attack(origin, possible_attack, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_attack;
-            }
-        }
-
-        attacks_bitboard
-    }
-    /* Helper Methods */
-
     fn get_knight_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
         let directions: [i8; 8] = [6, 10, 15, 17, -6, -10, -15, -17];
         let mut possible_attacks = vec![];
@@ -764,54 +618,13 @@ impl Bitboards {
         attacks_bitboard
     }
 
-    fn get_bishop_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 4] = [7, 9, -7, -9];
-        let mut possible_attacks = vec![];
-
-        for direction in directions {
-            let mut destination = origin as i8;
-
-            for _ in 0..7 {
-                destination += direction;
-
-                if destination < 0 || destination > 63 {
-                    break; //out of vertical bounds
-                }
-
-                let from_file = origin as i8 % 8;
-                let to_file = destination % 8;
-                let from_rank = origin as i8 / 8;
-                let to_rank = destination / 8;
-                let file_diff = (from_file - to_file).abs();
-                let rank_diff = (from_rank - to_rank).abs();
-
-                if !(file_diff == rank_diff) {
-                    break; //out of horizontal bounds
-                }
-
-                possible_attacks.push(destination as u8);
-
-                if let Some(_) = self.get_occupant(destination as u8) {
-                    break;
-                }
-            }
-        }
-
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_attack in possible_attacks {
-            if self.is_valid_attack(origin, possible_attack, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_attack;
-            }
-        }
-
-        attacks_bitboard
-    }
-
-    fn get_queen_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
-        let directions: [i8; 8] = [1, 8, 7, 9, -1, -8, -7, -9];
+    fn get_sliding_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
+        let directions = match piece.group {
+            PieceGroup::Bishop => vec![7, -7, 9, -9],
+            PieceGroup::Rook => vec![1, -1, 8, -8],
+            PieceGroup::Queen => vec![1, -1, 7, -7, 8, -8, 9, -9],
+            _ => vec![],
+        };
         let mut possible_attacks = vec![];
 
         for direction in directions {
@@ -896,6 +709,28 @@ impl Bitboards {
 
         attacks_bitboard
     }
+
+    fn create_legal_attacks_bitboard(
+        &self,
+        piece: Piece,
+        possible_attacks: Vec<u8>,
+        origin: u8,
+    ) -> u64 {
+        let piece_bitboard = self.all_pieces[piece.to_index()];
+        let mut attacks_bitboard = 0u64;
+
+        //check validity, shift bitboard if valid
+        for possible_move in possible_attacks {
+            if self.is_valid_attack(origin, possible_move, &piece_bitboard) {
+                attacks_bitboard |= 1u64 << possible_move;
+            }
+        }
+
+        //return bitboard with 1s in all legal attack positions
+        attacks_bitboard
+    }
+
+    /* Helper Methods */
 
     fn get_occupant(&self, square: u8) -> Option<Piece> {
         let destination_bitboard = Bitboards::convert_to_bit(square);
