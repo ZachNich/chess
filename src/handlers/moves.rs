@@ -18,8 +18,10 @@ pub async fn move_piece_handler(
     let (origin_idx, destination_idx) = (origin.to_index(), destination.to_index());
     locked_bitboards.move_piece(&mut locked_board, origin_idx, destination_idx);
 
+    let color = locked_board.toggle_turn_color();
+
     Ok(Json(SquaresAndMoves {
-        moves: locked_bitboards.get_all_legal_moves(),
+        moves: locked_bitboards.get_all_legal_moves(color),
         squares: locked_board.squares.clone(),
     }))
 }

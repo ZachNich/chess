@@ -9,7 +9,7 @@ pub async fn get_all_moves_handler(
     let mut locked_bitboards = bitboards.lock().await;
 
     Ok(Json(SquaresAndMoves {
-        moves: locked_bitboards.get_all_legal_moves(),
+        moves: locked_bitboards.get_all_legal_moves(locked_board.turn_color),
         squares: locked_board.squares.clone(),
     }))
 }

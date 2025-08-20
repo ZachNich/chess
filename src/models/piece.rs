@@ -107,7 +107,7 @@ impl Piece {
     }
 
     //0-5 White, 6-11 Black
-    //TODO: Make .bitboard an Option?
+    //TODO: Make .bitboard an Option or remove altogether?
     pub fn from_index(index: usize) -> Option<Piece> {
         match index {
             0 => Some(Piece {

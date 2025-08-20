@@ -4,6 +4,7 @@ use crate::models::position::Positions;
 #[derive(Clone)]
 pub struct Board {
     pub squares: Vec<Option<Piece>>,
+    pub turn_color: PieceColor,
 }
 
 impl Board {
@@ -11,7 +12,16 @@ impl Board {
     pub fn new() -> Self {
         Self {
             squares: Board::initialize_starting_squares(),
+            turn_color: PieceColor::White,
         }
+    }
+
+    pub fn toggle_turn_color(&mut self) -> PieceColor {
+        self.turn_color = match self.turn_color {
+            PieceColor::White => PieceColor::Black,
+            PieceColor::Black => PieceColor::White,
+        };
+        self.turn_color
     }
 
     pub fn update_square(&mut self, square: u8, update_to: Option<Piece>) -> () {

@@ -5,12 +5,13 @@ use crate::models::{
 };
 
 pub type PieceBitboards = [u64; 12];
-pub type AttackBitboards = [u64; 2];
+pub type ColorBitboards = [u64; 2];
 
 #[derive(Clone)]
 pub struct Bitboards {
     pub all_pieces: PieceBitboards, //idx order: wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk
-    attacks: AttackBitboards,
+    attacks: ColorBitboards,
+    checking_pieces: ColorBitboards,
 }
 
 impl Bitboards {
@@ -22,24 +23,29 @@ impl Bitboards {
                 Bitboards::create_empty_bitboard(),
                 Bitboards::create_empty_bitboard(),
             ],
+            checking_pieces: [
+                Bitboards::create_empty_bitboard(),
+                Bitboards::create_empty_bitboard(),
+            ],
         }
     }
 
     ///Gets all legal moves and returns a vector containing bitboards for each position.
-    pub fn get_all_legal_moves(&mut self) -> Vec<u64> {
+    pub fn get_all_legal_moves(&mut self, color: PieceColor) -> Vec<u64> {
         self.attacks = self.get_all_attacks();
         let mut all_legal_moves = vec![];
 
         for origin in 0..64 {
-            all_legal_moves.push(self.get_legal_moves(origin));
+            all_legal_moves.push(self.get_legal_moves(origin, color));
         }
-
         all_legal_moves
     }
 
     ///Gets all attacks and returns a bitboard of attacked squares for each color.
-    pub fn get_all_attacks(&mut self) -> AttackBitboards {
-        let mut all_attacks: AttackBitboards = [0u64, 0u64];
+    pub fn get_all_attacks(&mut self) -> ColorBitboards {
+        self.attacks = [0u64, 0u64];
+        self.checking_pieces = [0u64, 0u64];
+        let mut all_attacks: ColorBitboards = [0u64, 0u64];
 
         for origin in 0..64 {
             match self.get_occupant(origin) {
@@ -64,7 +70,7 @@ impl Bitboards {
                 origin,
                 destination,
                 &self.all_pieces[piece.to_index()],
-                piece.color,
+                piece,
             ) {
                 //invalid, exit
                 println!("Invalid move from {:?} to {:?}", origin, destination);
@@ -87,8 +93,7 @@ impl Bitboards {
             board.update_square(destination, Some(piece));
             board.update_square(origin, None);
 
-            //print updated bitboard
-            // Bitboards::print_bitboard(*bitboard, "bitboard");
+            self.checking_pieces = [0u64, 0u64];
         } else {
             println!(
                 "No piece found on origin {:?}",
@@ -213,39 +218,22 @@ impl Bitboards {
 
     /* Legal Move Calculations */
 
-    fn get_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
-        match piece.group {
-            PieceGroup::Pawn => self.get_pawn_attacks(origin, piece),
-            PieceGroup::Rook => self.get_sliding_attacks(origin, piece),
-            PieceGroup::Knight => self.get_knight_attacks(origin, piece),
-            PieceGroup::Bishop => self.get_sliding_attacks(origin, piece),
-            PieceGroup::Queen => self.get_sliding_attacks(origin, piece),
-            PieceGroup::King => self.get_king_attacks(origin, piece),
-        }
-    }
-
-    fn get_legal_moves(&mut self, origin: u8) -> u64 {
+    fn get_legal_moves(&mut self, origin: u8, color: PieceColor) -> u64 {
+        let empty_bitboard = Bitboards::create_empty_bitboard();
         if let Some(piece) = self.get_occupant(origin) {
-            match piece.group {
-                PieceGroup::Pawn => self.get_pawn_moves(origin, piece),
-                PieceGroup::Rook => self.get_sliding_moves(origin, piece),
-                PieceGroup::Knight => self.get_knight_moves(origin, piece),
-                PieceGroup::Bishop => self.get_sliding_moves(origin, piece),
-                PieceGroup::Queen => self.get_sliding_moves(origin, piece),
-                PieceGroup::King => {
-                    let is_checked = self.attacks
-                        [Piece::color_to_index(Piece::get_opposite_color(piece.color))]
-                        & Bitboards::convert_to_bit(origin)
-                        != 0;
-                    //check if is_checked before getting any legal moves
-                    //you can check this by comparing king's bb to opposite color's attacking bb
-                    //if is_checked, can only move king to undefended square OR move same-color piece to block
-                    //BUT cannot move a piece that is alraedy blocking a check
-                    self.get_king_moves(origin, piece)
-                }
+            match color == piece.color {
+                true => match piece.group {
+                    PieceGroup::Pawn => self.get_pawn_moves(origin, piece),
+                    PieceGroup::Rook => self.get_sliding_moves(origin, piece),
+                    PieceGroup::Knight => self.get_knight_moves(origin, piece),
+                    PieceGroup::Bishop => self.get_sliding_moves(origin, piece),
+                    PieceGroup::Queen => self.get_sliding_moves(origin, piece),
+                    PieceGroup::King => self.get_king_moves(origin, piece),
+                },
+                false => empty_bitboard,
             }
         } else {
-            0u64
+            empty_bitboard
         }
     }
 
@@ -253,10 +241,6 @@ impl Bitboards {
         let defending_bitboard = self.attacks[Piece::color_to_index(defending_color)];
         let combined_bitboard = Bitboards::convert_to_bit(square) & defending_bitboard;
         let is_defended = combined_bitboard != 0;
-        println!(
-            "Is square {} defended by {:?}? {}",
-            square, defending_color, is_defended
-        );
         is_defended
     }
 
@@ -274,49 +258,12 @@ impl Bitboards {
         let two_forward = origin + 16;
         let left_diagonal = origin + 7;
         let right_diagonal = origin + 9;
-        //TODO let en_passant = origin + 0;
+
         let mut possible_moves = vec![];
 
         if self.get_occupant(one_forward).is_none() {
             possible_moves.push(one_forward);
-        }
 
-        if origin >= starting_range.0
-            && origin <= starting_range.1
-            && self.get_occupant(two_forward).is_none()
-        {
-            possible_moves.push(two_forward);
-        }
-
-        if self.is_square_occupied_by_color(left_diagonal, Piece::get_opposite_color(piece.color)) {
-            possible_moves.push(left_diagonal);
-        }
-
-        if self.is_square_occupied_by_color(right_diagonal, Piece::get_opposite_color(piece.color))
-        {
-            possible_moves.push(right_diagonal);
-        }
-
-        self.create_legal_moves_bitboard(piece, possible_moves, origin)
-    }
-
-    fn get_black_pawn_moves(&mut self, origin: u8, piece: Piece) -> u64 {
-        let starting_range = (48, 55);
-
-        let one_forward = origin.checked_sub(8);
-        let two_forward = origin.checked_sub(16);
-        let left_diagonal = origin.checked_sub(7);
-        let right_diagonal = origin.checked_sub(9);
-        //TODO let en_passant = origin.checked_sub(0); //just left/right diagonals if en passant is enabled
-        let mut possible_moves: Vec<u8> = vec![];
-
-        if let Some(one_forward) = one_forward {
-            if self.get_occupant(one_forward).is_none() {
-                possible_moves.push(one_forward);
-            }
-        }
-
-        if let Some(two_forward) = two_forward {
             if origin >= starting_range.0
                 && origin <= starting_range.1
                 && self.get_occupant(two_forward).is_none()
@@ -325,47 +272,79 @@ impl Bitboards {
             }
         }
 
-        if let Some(left_diagonal) = left_diagonal {
-            if self
+        if Bitboards::is_piece_in_horizontal_bounds(origin as i8, left_diagonal as i8, 7, piece)
+            && self
                 .is_square_occupied_by_color(left_diagonal, Piece::get_opposite_color(piece.color))
-            {
-                possible_moves.push(left_diagonal);
-            }
+        {
+            self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
+            possible_moves.push(left_diagonal);
         }
 
-        if let Some(right_diagonal) = right_diagonal {
-            if self
+        if Bitboards::is_piece_in_horizontal_bounds(origin as i8, right_diagonal as i8, 9, piece)
+            && self
                 .is_square_occupied_by_color(right_diagonal, Piece::get_opposite_color(piece.color))
-            {
-                possible_moves.push(right_diagonal);
-            }
+        {
+            self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
+            possible_moves.push(right_diagonal);
         }
-        //TOD: if en passant, push en_passant to possible_moves
 
         self.create_legal_moves_bitboard(piece, possible_moves, origin)
     }
 
-    fn create_legal_moves_bitboard(
-        &self,
-        piece: Piece,
-        possible_moves: Vec<u8>,
-        origin: u8,
-    ) -> u64 {
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut moves_bitboard = 0u64;
+    fn get_black_pawn_moves(&mut self, origin: u8, piece: Piece) -> u64 {
+        let starting_range = (Positions::A7.to_index(), Positions::H7.to_index());
 
-        //check validity, shift bitboard if valid
-        for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
-                moves_bitboard |= 1u64 << possible_move;
+        let one_forward = origin.checked_sub(8);
+        let two_forward = origin.checked_sub(16);
+        let left_diagonal = origin.checked_sub(7);
+        let right_diagonal = origin.checked_sub(9);
+
+        let mut possible_moves: Vec<u8> = vec![];
+
+        if let Some(one_forward) = one_forward {
+            if self.get_occupant(one_forward).is_none() {
+                possible_moves.push(one_forward);
+
+                if let Some(two_forward) = two_forward {
+                    if origin >= starting_range.0
+                        && origin <= starting_range.1
+                        && self.get_occupant(two_forward).is_none()
+                    {
+                        possible_moves.push(two_forward);
+                    }
+                }
             }
         }
 
-        // println!("moves_bitboard for {:#?}", piece);
-        // Bitboards::print_bitboard(moves_bitboard, "bitboard");
+        if let Some(left_diagonal) = left_diagonal {
+            if Bitboards::is_piece_in_horizontal_bounds(
+                origin as i8,
+                left_diagonal as i8,
+                -7,
+                piece,
+            ) && self
+                .is_square_occupied_by_color(left_diagonal, Piece::get_opposite_color(piece.color))
+            {
+                possible_moves.push(left_diagonal);
+                self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
+            }
+        }
 
-        //return bitboard with 1s in all legal move positions
-        moves_bitboard
+        if let Some(right_diagonal) = right_diagonal {
+            if Bitboards::is_piece_in_horizontal_bounds(
+                origin as i8,
+                right_diagonal as i8,
+                -9,
+                piece,
+            ) && self
+                .is_square_occupied_by_color(right_diagonal, Piece::get_opposite_color(piece.color))
+            {
+                possible_moves.push(right_diagonal);
+                self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
+            }
+        }
+
+        self.create_legal_moves_bitboard(piece, possible_moves, origin)
     }
 
     fn get_sliding_moves(&mut self, origin: u8, piece: Piece) -> u64 {
@@ -380,50 +359,37 @@ impl Bitboards {
         for direction in directions {
             let mut destination = origin as i8;
 
-            for _ in 0..7 {
+            for _ in 0..8 {
                 destination += direction;
 
                 if destination < 0 || destination > 63 {
                     break; //out of vertical bounds
                 }
 
-                let from_file = origin as i8 % 8;
-                let to_file = destination % 8;
-                let from_rank = origin as i8 / 8;
-                let to_rank = destination / 8;
-                let file_diff = (from_file - to_file).abs();
-                let rank_diff = (from_rank - to_rank).abs();
-
-                match direction {
-                    1 if to_file <= from_file => break,
-                    -1 if to_file >= from_file => break,
-                    7 | -7 | 9 | -9 if file_diff != rank_diff => break,
-                    _ => {}
+                if !Bitboards::is_piece_in_horizontal_bounds(
+                    origin as i8,
+                    destination,
+                    direction,
+                    piece,
+                ) {
+                    break; //out of horizontal bounds
                 }
 
                 if let Some(piece_at_destination) = self.get_occupant(destination as u8) {
                     if piece_at_destination.color == Piece::get_opposite_color(piece.color) {
                         //is capture
                         possible_moves.push(destination as u8);
+                        self.update_checking_pieces_bitboards(origin, destination as u8, piece);
                     }
                     break;
                 }
 
                 possible_moves.push(destination as u8);
+                self.update_checking_pieces_bitboards(origin, destination as u8, piece);
             }
         }
 
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut moves_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
-                moves_bitboard |= 1u64 << possible_move;
-            }
-        }
-
-        moves_bitboard
+        self.create_legal_moves_bitboard(piece, possible_moves, origin)
     }
 
     fn get_knight_moves(&mut self, origin: u8, piece: Piece) -> u64 {
@@ -437,15 +403,13 @@ impl Bitboards {
                 continue; //out of vertical bounds
             }
 
-            let from_file = origin as i8 % 8;
-            let to_file = destination % 8;
-            let from_rank = origin as i8 / 8;
-            let to_rank = destination / 8;
-            let file_diff = (from_file - to_file).abs();
-            let rank_diff = (from_rank - to_rank).abs();
-
-            if !((file_diff == 1 && rank_diff == 2) || (file_diff == 2 && rank_diff == 1)) {
-                continue; //out of horizontal bounds
+            if !Bitboards::is_piece_in_horizontal_bounds(
+                origin as i8,
+                destination,
+                direction,
+                piece,
+            ) {
+                continue;
             }
 
             if let Some(piece_at_destination) = self.get_occupant(destination as u8) {
@@ -457,19 +421,10 @@ impl Bitboards {
             }
 
             possible_moves.push(destination as u8);
+            self.update_checking_pieces_bitboards(origin, destination as u8, piece);
         }
 
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut moves_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
-                moves_bitboard |= 1u64 << possible_move;
-            }
-        }
-
-        moves_bitboard
+        self.create_legal_moves_bitboard(piece, possible_moves, origin)
     }
 
     fn get_king_moves(&mut self, origin: u8, piece: Piece) -> u64 {
@@ -483,14 +438,12 @@ impl Bitboards {
                 continue; //out of vertical bounds
             }
 
-            let from_file = origin as i8 % 8;
-            let to_file = destination % 8;
-            let from_rank = origin as i8 / 8;
-            let to_rank = destination / 8;
-            let file_diff = (from_file - to_file).abs();
-            let rank_diff = (from_rank - to_rank).abs();
-
-            if file_diff > 1 || rank_diff > 1 || (file_diff == 0 && rank_diff == 0) {
+            if !Bitboards::is_piece_in_horizontal_bounds(
+                origin as i8,
+                destination,
+                direction,
+                piece,
+            ) {
                 continue;
             }
 
@@ -499,21 +452,12 @@ impl Bitboards {
                     //is capture
                     if self.is_square_defended(destination as u8, piece_at_destination.color) {
                         //square is defended, king can't capture
-                        println!(
-                            "square {} is defended by color {:?}",
-                            destination, piece_at_destination.color
-                        );
                         continue;
                     }
                 }
             } else if self
                 .is_square_defended(destination as u8, Piece::get_opposite_color(piece.color))
             {
-                println!(
-                    "square {} is defended by color {:?}",
-                    destination,
-                    Piece::get_opposite_color(piece.color)
-                );
                 //square is defended, king can't capture
                 continue;
             }
@@ -521,20 +465,40 @@ impl Bitboards {
             possible_moves.push(destination as u8);
         }
 
+        self.create_legal_moves_bitboard(piece, possible_moves, origin)
+    }
+
+    fn create_legal_moves_bitboard(
+        &self,
+        piece: Piece,
+        possible_moves: Vec<u8>,
+        origin: u8,
+    ) -> u64 {
         let piece_bitboard = self.all_pieces[piece.to_index()];
         let mut moves_bitboard = 0u64;
 
-        //check validity, shift bitboard if valid
         for possible_move in possible_moves {
-            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece.color) {
+            if self.is_valid_move(origin, possible_move, &piece_bitboard, piece) {
                 moves_bitboard |= 1u64 << possible_move;
             }
         }
 
+        //return bitboard with 1s in all legal move positions
         moves_bitboard
     }
 
     /* Attack Calculations */
+
+    fn get_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
+        match piece.group {
+            PieceGroup::Pawn => self.get_pawn_attacks(origin, piece),
+            PieceGroup::Rook => self.get_sliding_attacks(origin, piece),
+            PieceGroup::Knight => self.get_knight_attacks(origin, piece),
+            PieceGroup::Bishop => self.get_sliding_attacks(origin, piece),
+            PieceGroup::Queen => self.get_sliding_attacks(origin, piece),
+            PieceGroup::King => self.get_king_attacks(origin, piece),
+        }
+    }
 
     fn get_pawn_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
         match piece.color {
@@ -556,6 +520,9 @@ impl Bitboards {
         possible_attacks.push(left_diagonal);
         possible_attacks.push(right_diagonal);
 
+        self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
+        self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
+
         self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
     }
 
@@ -571,10 +538,12 @@ impl Bitboards {
 
         if let Some(left_diagonal) = left_diagonal {
             possible_attacks.push(left_diagonal);
+            self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
         }
 
         if let Some(right_diagonal) = right_diagonal {
             possible_attacks.push(right_diagonal);
+            self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
         }
 
         self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
@@ -603,19 +572,10 @@ impl Bitboards {
             }
 
             possible_attacks.push(destination as u8);
+            self.update_checking_pieces_bitboards(origin, destination as u8, piece);
         }
 
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_attack in possible_attacks {
-            if self.is_valid_attack(origin, possible_attack, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_attack;
-            }
-        }
-
-        attacks_bitboard
+        self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
     }
 
     fn get_sliding_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
@@ -652,6 +612,7 @@ impl Bitboards {
                 }
 
                 possible_attacks.push(destination as u8);
+                self.update_checking_pieces_bitboards(origin, destination as u8, piece);
 
                 if let Some(_) = self.get_occupant(destination as u8) {
                     break;
@@ -659,17 +620,7 @@ impl Bitboards {
             }
         }
 
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_attack in possible_attacks {
-            if self.is_valid_attack(origin, possible_attack, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_attack;
-            }
-        }
-
-        attacks_bitboard
+        self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
     }
 
     fn get_king_attacks(&mut self, origin: u8, piece: Piece) -> u64 {
@@ -695,19 +646,10 @@ impl Bitboards {
             }
 
             possible_attacks.push(destination as u8);
+            self.update_checking_pieces_bitboards(origin, destination as u8, piece);
         }
 
-        let piece_bitboard = self.all_pieces[piece.to_index()];
-        let mut attacks_bitboard = 0u64;
-
-        //check validity, shift bitboard if valid
-        for possible_attack in possible_attacks {
-            if self.is_valid_attack(origin, possible_attack, &piece_bitboard) {
-                attacks_bitboard |= 1u64 << possible_attack;
-            }
-        }
-
-        attacks_bitboard
+        self.create_legal_attacks_bitboard(piece, possible_attacks, origin)
     }
 
     fn create_legal_attacks_bitboard(
@@ -743,14 +685,66 @@ impl Bitboards {
         return None;
     }
 
-    /// Checks if origin & destination are within bounds, if origin is occupied by given piece, if destination is not occupied by same color.
-    fn is_valid_move(
-        &self,
-        origin: u8,
-        destination: u8,
-        bitboard: &u64,
-        color: PieceColor,
+    fn is_checked(&self, color: PieceColor) -> bool {
+        let king_bitboard = match color {
+            PieceColor::White => {
+                self.all_pieces[Piece {
+                    group: PieceGroup::King,
+                    color: PieceColor::White,
+                    bitboard: 0u64,
+                }
+                .to_index()]
+            }
+            PieceColor::Black => {
+                self.all_pieces[Piece {
+                    group: PieceGroup::King,
+                    color: PieceColor::Black,
+                    bitboard: 0u64,
+                }
+                .to_index()]
+            }
+        };
+        self.attacks[Piece::color_to_index(Piece::get_opposite_color(color))] & king_bitboard != 0
+    }
+
+    fn is_piece_in_horizontal_bounds(
+        origin: i8,
+        destination: i8,
+        direction: i8,
+        piece: Piece,
     ) -> bool {
+        match piece.group {
+            PieceGroup::Pawn | PieceGroup::Knight | PieceGroup::King => {
+                Bitboards::is_fixed_piece_in_horizontal_bounds(origin, destination)
+            }
+            _ => Bitboards::is_sliding_piece_in_horizontal_bounds(origin, destination, direction),
+        }
+    }
+
+    fn is_fixed_piece_in_horizontal_bounds(origin: i8, destination: i8) -> bool {
+        let origin_file = origin % 8;
+        let destination_file = destination % 8;
+
+        (origin_file - destination_file).abs() <= 2
+    }
+
+    fn is_sliding_piece_in_horizontal_bounds(origin: i8, destination: i8, direction: i8) -> bool {
+        let from_file = origin % 8;
+        let to_file = destination % 8;
+
+        match direction {
+            1 if to_file == 0 => return false,  // wrapped from H to A
+            -1 if to_file == 7 => return false, // wrapped from A to H
+            9 | -7 if to_file <= from_file => return false, // right diagonal must increase file
+            7 | -9 if to_file >= from_file => return false, // left diagonal must decrease file
+            _ => {}
+        }
+
+        true
+    }
+
+    /// Checks if origin & destination are within bounds, if origin is occupied by given piece, if destination is not occupied by same color.
+    fn is_valid_move(&self, origin: u8, destination: u8, bitboard: &u64, piece: Piece) -> bool {
         if origin < 0 || destination < 0 || origin > 63 || destination > 63 {
             //out of bounds
             return false;
@@ -759,10 +753,40 @@ impl Bitboards {
             //piece to move's bitboard doesn't have 1 at origin
             return false;
         }
-        if self.is_square_occupied_by_color(destination, color) {
+        if self.is_square_occupied_by_color(destination, piece.color) {
             //destination is occupied by same colored piece
             return false;
         }
+        if self.is_checked(piece.color) && piece.group != PieceGroup::King {
+            //is check
+            let king_bitboard = self.all_pieces[Piece {
+                group: PieceGroup::King,
+                color: piece.color,
+                bitboard: 0u64,
+            }
+            .to_index()];
+            let checkers_bitboard =
+                self.checking_pieces[Piece::color_to_index(Piece::get_opposite_color(piece.color))];
+            let blocking_bitboard =
+                Bitboards::get_rays_from_bitboards(checkers_bitboard, king_bitboard);
+
+            if self.checking_pieces[Piece::color_to_index(Piece::get_opposite_color(piece.color))]
+                & Bitboards::convert_to_bit(destination)
+                == 0
+                && blocking_bitboard & Bitboards::convert_to_bit(destination) == 0
+            {
+                //is non-king move that is neither capturing nor blocking a checking piece
+                return false;
+            }
+        }
+
+        if piece.group == PieceGroup::King
+            && self.is_square_defended(destination as u8, Piece::get_opposite_color(piece.color))
+        {
+            //king move is to defended square
+            return false;
+        }
+
         true
     }
 
@@ -777,6 +801,76 @@ impl Bitboards {
             return false;
         }
         true
+    }
+
+    fn get_rays_from_bitboards(origins: u64, destination: u64) -> u64 {
+        if destination.count_ones() != 1 {
+            //TODO: Handle this better
+            panic!("Destination bitboard must have exactly one bit set.");
+        }
+
+        let destination_index = destination.trailing_zeros() as u8;
+        let mut rays_bitboard = 0u64;
+
+        let mut origin_bits = origins;
+        while origin_bits != 0 {
+            let origin_index = origin_bits.trailing_zeros() as u8;
+            origin_bits &= origin_bits - 1; // clears the lowest/least significant bit
+
+            rays_bitboard |= Bitboards::get_ray_bitboard(origin_index, destination_index);
+        }
+
+        rays_bitboard
+    }
+
+    fn get_ray_bitboard(origin: u8, destination: u8) -> u64 {
+        let from_file = origin as i8 % 8;
+        let to_file = destination as i8 % 8;
+        let from_rank = origin as i8 / 8;
+        let to_rank = destination as i8 / 8;
+        let file_diff = to_file - from_file;
+        let rank_diff = to_rank - from_rank;
+        let (file_step, rank_step) = match (file_diff, rank_diff) {
+            (0, _) => (0, rank_diff.signum()), // vertical
+            (_, 0) => (file_diff.signum(), 0), // horizontal
+            _ if file_diff.abs() == rank_diff.abs() => (
+                // diagonal
+                file_diff.signum(),
+                rank_diff.signum(),
+            ),
+            _ => return 0, // invalid
+        };
+
+        let mut bitboard = 0u64;
+        let mut current_rank = from_rank + rank_step;
+        let mut current_file = from_file + file_step;
+
+        //while not at destination
+        while current_rank != to_rank || current_file != to_file {
+            let square = (current_rank * 8 + current_file) as u8;
+            bitboard |= 1u64 << square;
+
+            current_rank += rank_step;
+            current_file += file_step;
+        }
+
+        bitboard
+    }
+
+    fn update_checking_pieces_bitboards(
+        &mut self,
+        attacker_square: u8,
+        attacked_square: u8,
+        attacking_piece: Piece,
+    ) {
+        if self.get_occupant(attacked_square).is_some_and(|occupant| {
+            occupant.color == Piece::get_opposite_color(attacking_piece.color)
+                && occupant.group == PieceGroup::King
+        }) {
+            //is checker
+            self.checking_pieces[Piece::color_to_index(attacking_piece.color)] |=
+                1u64 << attacker_square;
+        }
     }
 
     fn is_square_occupied_by_color(&self, square: u8, piece_color: PieceColor) -> bool {
@@ -802,6 +896,19 @@ impl Bitboards {
 
     fn is_square_occupied_by_bitboard(square: u8, bitboard: u64) -> bool {
         Bitboards::convert_to_bit(square) & bitboard != 0
+    }
+
+    fn convert_bitboard_to_indexes(mut bitboard: u64) -> Vec<u8> {
+        let mut indexes = Vec::new();
+
+        while bitboard != 0 {
+            //lsb = least significant bit
+            let lsb_index = bitboard.trailing_zeros() as u8;
+            indexes.push(lsb_index);
+            bitboard &= bitboard - 1; // clear the least significant bit
+        }
+
+        indexes
     }
 
     pub fn convert_to_bit(num: u8) -> u64 {
