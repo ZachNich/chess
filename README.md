@@ -25,4 +25,5 @@ Make sure you have these installed:
 
 -   `cd chess-ui`
 -   `npm install`
+-   `npm run build`
 -   `npm start`
