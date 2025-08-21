@@ -12,6 +12,7 @@ pub struct Bitboards {
     pub all_pieces: PieceBitboards, //idx order: wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk
     attacks: ColorBitboards,
     checking_pieces: ColorBitboards,
+    en_passant: u64,
 }
 
 impl Bitboards {
@@ -27,6 +28,7 @@ impl Bitboards {
                 Bitboards::create_empty_bitboard(),
                 Bitboards::create_empty_bitboard(),
             ],
+            en_passant: Bitboards::create_empty_bitboard(),
         }
     }
 
@@ -85,6 +87,42 @@ impl Bitboards {
                     let captured_piece_bitboard = &mut self.all_pieces[captured_piece.to_index()];
                     *captured_piece_bitboard &= !(1u64 << destination);
                 }
+            }
+            if self.en_passant & Bitboards::convert_to_bit(destination) != 0 {
+                //is en passant
+                let captured_pawn_square = match piece.color {
+                    PieceColor::White => destination - 8,
+                    PieceColor::Black => destination + 8,
+                };
+                println!("En passant captures square {:?}", captured_pawn_square);
+
+                let captured_pawn_bitboard = &mut self.all_pieces[Piece::to_piece_index(
+                    Piece::get_opposite_color(piece.color),
+                    PieceGroup::Pawn,
+                )];
+
+                //clear square behind en passant destination
+                *captured_pawn_bitboard &= !(1u64 << captured_pawn_square);
+                board.update_square(captured_pawn_square, None);
+            }
+
+            //calculate en passants for next move
+            let sign = match piece.color {
+                PieceColor::White => -1,
+                PieceColor::Black => 1,
+            };
+
+            if piece.group == PieceGroup::Pawn && origin.abs_diff(destination) == 8 * 2 {
+                let mut en_passant_bb = 0u64;
+
+                if self.get_occupant(destination - 1).is_some()
+                    || self.get_occupant(destination + 1).is_some()
+                {
+                    //destination of possible en passanting pawn
+                    en_passant_bb |= 1u64 << (destination as i8 + 8 * sign);
+                }
+                Bitboards::print_bitboard(en_passant_bb, "en_passant board");
+                self.en_passant = en_passant_bb;
             }
 
             //move piece by updating origin and destination on piece's bitboard
@@ -273,17 +311,22 @@ impl Bitboards {
         }
 
         if Bitboards::is_piece_in_horizontal_bounds(origin as i8, left_diagonal as i8, 7, piece)
-            && self
+            && (self
                 .is_square_occupied_by_color(left_diagonal, Piece::get_opposite_color(piece.color))
+                || self.en_passant & Bitboards::convert_to_bit(left_diagonal) != 0)
         {
+            //is capture or en passant
             self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
             possible_moves.push(left_diagonal);
         }
 
         if Bitboards::is_piece_in_horizontal_bounds(origin as i8, right_diagonal as i8, 9, piece)
-            && self
-                .is_square_occupied_by_color(right_diagonal, Piece::get_opposite_color(piece.color))
+            && (self.is_square_occupied_by_color(
+                right_diagonal,
+                Piece::get_opposite_color(piece.color),
+            ) || self.en_passant & Bitboards::convert_to_bit(right_diagonal) != 0)
         {
+            //is capture or en passant
             self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
             possible_moves.push(right_diagonal);
         }
@@ -322,8 +365,9 @@ impl Bitboards {
                 left_diagonal as i8,
                 -7,
                 piece,
-            ) && self
+            ) && (self
                 .is_square_occupied_by_color(left_diagonal, Piece::get_opposite_color(piece.color))
+                || self.en_passant & Bitboards::convert_to_bit(left_diagonal) != 0)
             {
                 possible_moves.push(left_diagonal);
                 self.update_checking_pieces_bitboards(origin, left_diagonal, piece);
@@ -336,8 +380,10 @@ impl Bitboards {
                 right_diagonal as i8,
                 -9,
                 piece,
-            ) && self
-                .is_square_occupied_by_color(right_diagonal, Piece::get_opposite_color(piece.color))
+            ) && (self.is_square_occupied_by_color(
+                right_diagonal,
+                Piece::get_opposite_color(piece.color),
+            ) || self.en_passant & Bitboards::convert_to_bit(right_diagonal) != 0)
             {
                 possible_moves.push(right_diagonal);
                 self.update_checking_pieces_bitboards(origin, right_diagonal, piece);
