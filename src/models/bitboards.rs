@@ -743,28 +743,87 @@ impl Bitboards {
         true
     }
 
+    fn get_all_pieces_on_one_bitboard(&self) -> u64 {
+        self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Pawn)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Rook)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Knight)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Bishop)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Queen)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::King)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Pawn)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Rook)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Knight)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Bishop)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Queen)]
+            | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::King)]
+    }
+
+    fn get_same_color_pieces_on_one_bitboard(&self, color: PieceColor) -> u64 {
+        match color {
+            PieceColor::White => {
+                self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Pawn)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Rook)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Knight)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Bishop)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::Queen)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::White, PieceGroup::King)]
+            }
+
+            PieceColor::Black => {
+                self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Pawn)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Rook)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Knight)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Bishop)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::Queen)]
+                    | self.all_pieces[Piece::to_piece_index(PieceColor::Black, PieceGroup::King)]
+            }
+        }
+    }
+
     /// Checks if origin & destination are within bounds, if origin is occupied by given piece, if destination is not occupied by same color.
-    fn is_valid_move(&self, origin: u8, destination: u8, bitboard: &u64, piece: Piece) -> bool {
+    fn is_valid_move(
+        &self,
+        origin: u8,
+        destination: u8,
+        origin_bitboard: &u64,
+        piece: Piece,
+    ) -> bool {
         if origin < 0 || destination < 0 || origin > 63 || destination > 63 {
             //out of bounds
             return false;
         }
-        if Bitboards::convert_to_bit(origin) & *bitboard == 0 {
-            //piece to move's bitboard doesn't have 1 at origin
+        if Bitboards::convert_to_bit(origin) & *origin_bitboard == 0 {
+            //piece to move's bitboard doesn't have piece at origin
             return false;
         }
         if self.is_square_occupied_by_color(destination, piece.color) {
             //destination is occupied by same colored piece
             return false;
         }
+        if !self.validate_pins(piece, origin, destination) {
+            //pinned piece tries to move out of pin
+            return false;
+        }
+        if !self.validate_checks(piece, destination) {
+            //if king is in check, this is a non-king move that neither captures nor blocks a checking piece
+            return false;
+        }
+
+        if piece.group == PieceGroup::King
+            && self.is_square_defended(destination as u8, Piece::get_opposite_color(piece.color))
+        {
+            //king move is to defended square
+            return false;
+        }
+
+        true
+    }
+
+    fn validate_checks(&self, piece: Piece, destination: u8) -> bool {
         if self.is_checked(piece.color) && piece.group != PieceGroup::King {
             //is check
-            let king_bitboard = self.all_pieces[Piece {
-                group: PieceGroup::King,
-                color: piece.color,
-                bitboard: 0u64,
-            }
-            .to_index()];
+            let king_bitboard =
+                self.all_pieces[Piece::to_piece_index(piece.color, PieceGroup::King)];
             let checkers_bitboard =
                 self.checking_pieces[Piece::color_to_index(Piece::get_opposite_color(piece.color))];
             let blocking_bitboard =
@@ -779,14 +838,49 @@ impl Bitboards {
                 return false;
             }
         }
+        true
+    }
 
-        if piece.group == PieceGroup::King
-            && self.is_square_defended(destination as u8, Piece::get_opposite_color(piece.color))
-        {
-            //king move is to defended square
-            return false;
+    fn validate_pins(&self, piece: Piece, origin: u8, destination: u8) -> bool {
+        let bishop_bb = self.all_pieces
+            [Piece::to_piece_index(Piece::get_opposite_color(piece.color), PieceGroup::Bishop)];
+        let rook_bb = self.all_pieces
+            [Piece::to_piece_index(Piece::get_opposite_color(piece.color), PieceGroup::Rook)];
+        let queen_bb = self.all_pieces
+            [Piece::to_piece_index(Piece::get_opposite_color(piece.color), PieceGroup::Queen)];
+
+        let king_bitboard = self.all_pieces[Piece::to_piece_index(piece.color, PieceGroup::King)];
+        for mut sliding_bb in [bishop_bb, rook_bb, queen_bb] {
+            while sliding_bb != 0 {
+                let ray_origin = sliding_bb.trailing_zeros() as u8;
+                let ray_destination = king_bitboard.trailing_zeros() as u8;
+                let pin_ray = Bitboards::get_ray_bitboard(ray_origin, ray_destination);
+                let obstructions = pin_ray & self.get_all_pieces_on_one_bitboard();
+                let friendly_pieces = self.get_same_color_pieces_on_one_bitboard(piece.color);
+                if origin == 18 {
+                    Bitboards::print_bitboard(pin_ray, "Pin Ray");
+                    println!(
+                        "pin origin {}, king destination {}",
+                        ray_origin, ray_destination
+                    );
+                    Bitboards::print_bitboard(obstructions, "Obstructions in Pin Ray");
+                    Bitboards::print_bitboard(friendly_pieces, "All Friendly Pieces");
+                }
+
+                // only piece obstructing pin is current piece, valid pin
+                if obstructions == Bitboards::convert_to_bit(origin) {
+                    let legal_pin_ray = Bitboards::get_ray_bitboard(ray_origin, ray_destination)
+                        | (1u64 << ray_origin)
+                        | (1u64 << ray_destination);
+
+                    if Bitboards::convert_to_bit(destination) & legal_pin_ray == 0 {
+                        //trying to escape pin, invalid move
+                        return false;
+                    }
+                }
+                sliding_bb &= sliding_bb - 1;
+            }
         }
-
         true
     }
 
@@ -806,7 +900,11 @@ impl Bitboards {
     fn get_rays_from_bitboards(origins: u64, destination: u64) -> u64 {
         if destination.count_ones() != 1 {
             //TODO: Handle this better
-            panic!("Destination bitboard must have exactly one bit set.");
+
+            panic!(
+                "Destination bitboard must have exactly one bit set, received {:#?}",
+                destination as u8
+            );
         }
 
         let destination_index = destination.trailing_zeros() as u8;

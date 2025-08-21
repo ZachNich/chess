@@ -91,7 +91,11 @@ impl Piece {
     }
 
     pub fn to_index(&self) -> usize {
-        let piece_index = match self.group {
+        Piece::to_piece_index(self.color, self.group)
+    }
+
+    pub fn to_piece_index(color: PieceColor, group: PieceGroup) -> usize {
+        let piece_index = match group {
             PieceGroup::Pawn => 0,
             PieceGroup::Rook => 1,
             PieceGroup::Knight => 2,
@@ -100,7 +104,7 @@ impl Piece {
             PieceGroup::King => 5,
         };
         piece_index
-            + match self.color {
+            + match color {
                 PieceColor::White => 0,
                 PieceColor::Black => 6,
             }
