@@ -1,4 +1,9 @@
-use crate::models::{bitboards::Bitboards, board::Board, piece::Piece};
+use crate::models::{
+    bitboards::Bitboards,
+    board::Board,
+    piece::{Piece, PieceGroup},
+    position::Positions,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -13,4 +18,11 @@ pub struct SquaresAndMoves {
 pub struct AppState {
     pub board: Arc<Mutex<Board>>,
     pub bitboards: Arc<Mutex<Bitboards>>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MoveParams {
+    pub origin: Positions,
+    pub destination: Positions,
+    pub promotion: Option<PieceGroup>,
 }

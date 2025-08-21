@@ -7,8 +7,12 @@ use crate::{
     handlers::{board::get_all_moves_handler, moves::move_piece_handler},
     models::{bitboards::Bitboards, board::Board, response::AppState},
 };
-use axum::{Router, http::HeaderValue, routing::get};
-use hyper::Method;
+use axum::{
+    Router,
+    http::HeaderValue,
+    routing::{get, post},
+};
+use hyper::{Method, header::CONTENT_TYPE};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
@@ -22,10 +26,7 @@ async fn main() {
 fn create_router() -> Router {
     Router::new()
         .route("/board", get(get_all_moves_handler))
-        .route(
-            "/move/{origin}/{destination}", //origin and destination are Positions
-            get(move_piece_handler),
-        )
+        .route("/move", post(move_piece_handler))
         .with_state(create_state())
         .layer(create_cors())
 }
@@ -39,5 +40,6 @@ fn create_state() -> AppState {
 fn create_cors() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(HeaderValue::from_static("http://localhost:3000"))
-        .allow_methods([Method::GET])
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([CONTENT_TYPE])
 }

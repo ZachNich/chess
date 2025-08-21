@@ -3,6 +3,7 @@ use crate::models::{
     piece::{Piece, PieceColor, PieceGroup},
     position::Positions,
 };
+use hyper::StatusCode;
 
 pub type PieceBitboards = [u64; 12];
 pub type ColorBitboards = [u64; 2];
@@ -33,12 +34,12 @@ impl Bitboards {
     }
 
     ///Gets all legal moves and returns a vector containing bitboards for each position.
-    pub fn get_all_legal_moves(&mut self, color: PieceColor) -> Vec<u64> {
+    pub fn get_all_legal_moves(&mut self, board: &mut Board) -> Vec<u64> {
         self.attacks = self.get_all_attacks();
         let mut all_legal_moves = vec![];
 
         for origin in 0..64 {
-            all_legal_moves.push(self.get_legal_moves(origin, color));
+            all_legal_moves.push(self.get_legal_moves(board, origin));
         }
         all_legal_moves
     }
@@ -63,7 +64,12 @@ impl Bitboards {
     }
 
     ///Moves piece by updating moved piece's bitboard and any captured piece's bitboard
-    pub fn move_piece(&mut self, board: &mut Board, origin: u8, destination: u8) {
+    pub fn move_piece(
+        &mut self,
+        board: &mut Board,
+        origin: u8,
+        destination: u8,
+    ) -> Result<(), hyper::StatusCode> {
         println!("Moving piece from {} to {}", origin, destination);
         //get piece to move
         if let Some(piece) = self.get_occupant(origin) {
@@ -76,7 +82,7 @@ impl Bitboards {
             ) {
                 //invalid, exit
                 println!("Invalid move from {:?} to {:?}", origin, destination);
-                return; //TODO: Return invalid move error?
+                return Err(StatusCode::BAD_REQUEST); //TODO: Return invalid move error?
             }
             if self.is_square_occupied_by_color(destination, Piece::get_opposite_color(piece.color))
             {
@@ -107,12 +113,11 @@ impl Bitboards {
             }
 
             //calculate en passants for next move
-            let sign = match piece.color {
-                PieceColor::White => -1,
-                PieceColor::Black => 1,
-            };
-
             if piece.group == PieceGroup::Pawn && origin.abs_diff(destination) == 8 * 2 {
+                let sign = match piece.color {
+                    PieceColor::White => -1,
+                    PieceColor::Black => 1,
+                };
                 let mut en_passant_bb = 0u64;
 
                 if self.get_occupant(destination - 1).is_some()
@@ -125,18 +130,158 @@ impl Bitboards {
                 self.en_passant = en_passant_bb;
             }
 
+            //can't castle if king or rook has moved
+            match (piece.group, piece.color, origin) {
+                (PieceGroup::King, PieceColor::White, 4) => {
+                    match destination {
+                        2 => {
+                            //queenside castling, need to update rook location since king location will be updated in final logic of move_piece
+                            let (rook_origin, rook_destination) = (0, 3);
+                            let rook_bitboard = &mut self.all_pieces
+                                [Piece::to_piece_index(piece.color, PieceGroup::Rook)];
+                            *rook_bitboard = (*rook_bitboard & !(1u64 << rook_origin))
+                                | (1u64 << rook_destination);
+                            board.update_square(
+                                rook_destination,
+                                Some(Piece {
+                                    group: PieceGroup::Rook,
+                                    color: piece.color,
+                                    bitboard: 0u64,
+                                }),
+                            );
+                            board.update_square(rook_origin, None);
+                        }
+                        6 => {
+                            //kingside castling, need to update rook location since king location will be updated in final logic of move_piece
+                            let (rook_origin, rook_destination) = (7, 5);
+                            let rook_bitboard = &mut self.all_pieces
+                                [Piece::to_piece_index(piece.color, PieceGroup::Rook)];
+                            *rook_bitboard = (*rook_bitboard & !(1u64 << rook_origin))
+                                | (1u64 << rook_destination);
+                            board.update_square(
+                                rook_destination,
+                                Some(Piece {
+                                    group: PieceGroup::Rook,
+                                    color: piece.color,
+                                    bitboard: 0u64,
+                                }),
+                            );
+                            board.update_square(rook_origin, None);
+                        }
+                        _ => {}
+                    }
+                    board.update_can_castle(piece.color, PieceGroup::King, false);
+                    board.update_can_castle(piece.color, PieceGroup::Queen, false);
+                }
+                (PieceGroup::King, PieceColor::Black, 60) => {
+                    match destination {
+                        58 => {
+                            //queenside castling, need to update rook location since king location will be updated in final logic of move_piece
+                            let (rook_origin, rook_destination) = (56, 59);
+                            let rook_bitboard = &mut self.all_pieces
+                                [Piece::to_piece_index(piece.color, PieceGroup::Rook)];
+                            *rook_bitboard = (*rook_bitboard & !(1u64 << rook_origin))
+                                | (1u64 << rook_destination);
+                            board.update_square(
+                                rook_destination,
+                                Some(Piece {
+                                    group: PieceGroup::Rook,
+                                    color: piece.color,
+                                    bitboard: 0u64,
+                                }),
+                            );
+                            board.update_square(rook_origin, None);
+                        }
+                        62 => {
+                            //kingside castling, need to update rook location since king location will be updated in final logic of move_piece
+                            let (rook_origin, rook_destination) = (63, 61);
+                            let rook_bitboard = &mut self.all_pieces
+                                [Piece::to_piece_index(piece.color, PieceGroup::Rook)];
+                            *rook_bitboard = (*rook_bitboard & !(1u64 << rook_origin))
+                                | (1u64 << rook_destination);
+                            board.update_square(
+                                rook_destination,
+                                Some(Piece {
+                                    group: PieceGroup::Rook,
+                                    color: piece.color,
+                                    bitboard: 0u64,
+                                }),
+                            );
+                            board.update_square(rook_origin, None);
+                        }
+                        _ => {}
+                    }
+                    board.update_can_castle(piece.color, PieceGroup::King, false);
+                    board.update_can_castle(piece.color, PieceGroup::Queen, false);
+                }
+                (PieceGroup::Rook, PieceColor::White, 0) => {
+                    board.update_can_castle(piece.color, PieceGroup::Queen, false)
+                }
+                (PieceGroup::Rook, PieceColor::White, 7) => {
+                    board.update_can_castle(piece.color, PieceGroup::King, false)
+                }
+                (PieceGroup::Rook, PieceColor::Black, 56) => {
+                    board.update_can_castle(piece.color, PieceGroup::Queen, false)
+                }
+                (PieceGroup::Rook, PieceColor::Black, 63) => {
+                    board.update_can_castle(piece.color, PieceGroup::King, false)
+                }
+                _ => {}
+            }
+
+            //TODO: make is_castle() function
+
             //move piece by updating origin and destination on piece's bitboard
             let bitboard = &mut self.all_pieces[piece.to_index()];
             *bitboard = (*bitboard & !(1u64 << origin)) | (1u64 << destination);
             board.update_square(destination, Some(piece));
             board.update_square(origin, None);
 
+            //reset checking_pieces, may not be necessary
             self.checking_pieces = [0u64, 0u64];
         } else {
             println!(
                 "No piece found on origin {:?}",
                 Positions::from_index(origin)
             );
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Ok(())
+    }
+
+    pub fn promote_pawn(
+        &mut self,
+        board: &mut Board,
+        origin: u8,
+        destination: u8,
+        promotion: PieceGroup,
+    ) -> Result<(), hyper::StatusCode> {
+        match self.move_piece(board, origin, destination).is_ok_and(|_| {
+            //clear destination from pawn bitboard
+            //add destination to promotion bitboard
+            //update_square on board for destination to promotion piece
+            if let Some(pawn) = self.get_occupant(destination) {
+                let pawn_bitboard = &mut self.all_pieces[pawn.to_index()];
+                *pawn_bitboard &= !(1u64 << destination);
+
+                let promotion_bitboard =
+                    &mut self.all_pieces[Piece::to_piece_index(pawn.color, promotion)];
+                *promotion_bitboard |= 1u64 << destination;
+
+                board.update_square(
+                    destination,
+                    Some(Piece {
+                        group: promotion,
+                        color: pawn.color,
+                        bitboard: 0u64,
+                    }),
+                );
+                return true;
+            }
+            false
+        }) {
+            true => return Ok(()),
+            false => return Err(StatusCode::BAD_REQUEST),
         }
     }
 
@@ -256,17 +401,17 @@ impl Bitboards {
 
     /* Legal Move Calculations */
 
-    fn get_legal_moves(&mut self, origin: u8, color: PieceColor) -> u64 {
+    fn get_legal_moves(&mut self, board: &mut Board, origin: u8) -> u64 {
         let empty_bitboard = Bitboards::create_empty_bitboard();
         if let Some(piece) = self.get_occupant(origin) {
-            match color == piece.color {
+            match board.turn_color == piece.color {
                 true => match piece.group {
                     PieceGroup::Pawn => self.get_pawn_moves(origin, piece),
                     PieceGroup::Rook => self.get_sliding_moves(origin, piece),
                     PieceGroup::Knight => self.get_knight_moves(origin, piece),
                     PieceGroup::Bishop => self.get_sliding_moves(origin, piece),
                     PieceGroup::Queen => self.get_sliding_moves(origin, piece),
-                    PieceGroup::King => self.get_king_moves(origin, piece),
+                    PieceGroup::King => self.get_king_moves(board, origin, piece),
                 },
                 false => empty_bitboard,
             }
@@ -473,7 +618,7 @@ impl Bitboards {
         self.create_legal_moves_bitboard(piece, possible_moves, origin)
     }
 
-    fn get_king_moves(&mut self, origin: u8, piece: Piece) -> u64 {
+    fn get_king_moves(&mut self, board: &Board, origin: u8, piece: Piece) -> u64 {
         let directions: [i8; 8] = [1, 8, 7, 9, -1, -8, -7, -9];
         let mut possible_moves = vec![];
 
@@ -509,6 +654,48 @@ impl Bitboards {
             }
 
             possible_moves.push(destination as u8);
+        }
+
+        //check to add kingside castling
+        if board.can_kingside_castle[Piece::color_to_index(piece.color)] {
+            let kingside_rook = match piece.color {
+                PieceColor::White => 7,
+                PieceColor::Black => 63,
+            };
+            let castle_destination = origin + 2;
+            let castle_ray = Bitboards::get_ray_bitboard(origin, kingside_rook)
+                | Bitboards::convert_to_bit(origin)
+                | Bitboards::convert_to_bit(kingside_rook); //inclusive
+            let enemy_attacks =
+                self.attacks[Piece::color_to_index(Piece::get_opposite_color(piece.color))];
+            if (castle_ray & self.get_all_pieces_on_one_bitboard()).count_ones() == 2
+                && castle_ray & enemy_attacks == 0
+            {
+                //only king and rook are in castling squares
+                //no enemy checks are hitting castling squares
+                possible_moves.push(castle_destination); //kingside castle
+            }
+        }
+
+        //check to add queenside castling
+        if board.can_queenside_castle[Piece::color_to_index(piece.color)] {
+            let queenside_rook = match piece.color {
+                PieceColor::White => 0,
+                PieceColor::Black => 56,
+            };
+            let castle_destination = origin - 2;
+            let castle_ray = Bitboards::get_ray_bitboard(origin, queenside_rook)
+                | Bitboards::convert_to_bit(origin)
+                | Bitboards::convert_to_bit(queenside_rook); //inclusive
+            let enemy_attacks =
+                self.attacks[Piece::color_to_index(Piece::get_opposite_color(piece.color))];
+            if (castle_ray & self.get_all_pieces_on_one_bitboard()).count_ones() == 2
+                && castle_ray & enemy_attacks == 0
+            {
+                //only king and rook are in castling squares
+                //no enemy checks are hitting castling squares
+                possible_moves.push(castle_destination); //kingside castle
+            }
         }
 
         self.create_legal_moves_bitboard(piece, possible_moves, origin)

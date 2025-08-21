@@ -5,6 +5,8 @@ use crate::models::position::Positions;
 pub struct Board {
     pub squares: Vec<Option<Piece>>,
     pub turn_color: PieceColor,
+    pub can_kingside_castle: [bool; 2],
+    pub can_queenside_castle: [bool; 2],
 }
 
 impl Board {
@@ -13,6 +15,26 @@ impl Board {
         Self {
             squares: Board::initialize_starting_squares(),
             turn_color: PieceColor::White,
+            can_kingside_castle: [true, true],
+            can_queenside_castle: [true, true],
+        }
+    }
+
+    //TODO: only allow King or Queen to be passed as "side" arg
+    pub fn update_can_castle(
+        &mut self,
+        color: PieceColor,
+        side: PieceGroup,
+        update_value: bool,
+    ) -> () {
+        match side {
+            PieceGroup::King => {
+                self.can_kingside_castle[Piece::color_to_index(color)] = update_value
+            }
+            PieceGroup::Queen => {
+                self.can_queenside_castle[Piece::color_to_index(color)] = update_value
+            }
+            _ => {}
         }
     }
 
